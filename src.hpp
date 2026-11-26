@@ -2,7 +2,7 @@
 #define MEMO_HPP
 
 #include "event.h"
-#include <iostream>
+#include <cstdio>
 
 // Event type enum for fast dispatch
 enum EventType {
@@ -14,7 +14,7 @@ enum EventType {
 // Node in the linked list representing a scheduled notification
 struct Node {
     const Event* event;
-    int next_time;  // when this event should be notified again (-1 if no more notifications)
+    int next_time;
     EventType type;
     Node* next;
 };
@@ -89,27 +89,33 @@ class Memo {
     EventType etype = TYPE_NORMAL;
     
     if (dynamic_cast<const NormalEvent*>(event) != nullptr) {
-        // NormalEvent: add to deadline list
         add_time = event->GetDeadline();
         etype = TYPE_NORMAL;
     } else if (dynamic_cast<const NotifyBeforeEvent*>(event) != nullptr) {
-        // NotifyBeforeEvent: add to notify_time list
         const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
         add_time = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
         etype = TYPE_NOTIFY_BEFORE;
     } else if (dynamic_cast<const NotifyLateEvent*>(event) != nullptr) {
-        // NotifyLateEvent: add to deadline list
         add_time = event->GetDeadline();
         etype = TYPE_NOTIFY_LATE;
     }
     
-    // Create new node and insert into sorted linked list by time
     Node* newNode = new Node;
     newNode->event = event;
     newNode->next_time = add_time;
     newNode->type = etype;
     newNode->next = nullptr;
     InsertNode(newNode);
+  }
+
+  // Helper: print string using printf for speed
+  void PrintString(const std::string& s) {
+    const char* cstr = s.c_str();
+    while (*cstr) {
+        fputc(*cstr, stdout);
+        cstr++;
+    }
+    fputc('\n', stdout);
   }
 
   // 模拟时间流逝，进行下一个小时的事件提醒
@@ -125,7 +131,6 @@ class Memo {
     Node* cur = head_;
     while (cur != nullptr) {
         if (cur->next_time < hour) {
-            // Outdated node, remove
             Node* tmp = cur;
             if (prev == nullptr) {
                 head_ = cur->next;
@@ -148,7 +153,6 @@ class Memo {
     
     // Pass 2: process each node at the current hour
     for (int i = 0; i < count_at_hour; i++) {
-        // Find the first node at current hour
         Node* node = nullptr;
         Node* p = head_;
         while (p != nullptr && p->next_time != hour) {
@@ -160,7 +164,6 @@ class Memo {
         const Event* event = node->event;
         
         if (event->IsComplete()) {
-            // Completed, remove node
             RemoveNode(node);
             delete node;
             i--;
@@ -172,7 +175,7 @@ class Memo {
         
         switch (node->type) {
             case TYPE_NORMAL: {
-                std::cout << event->GetNotification(0) << "\n";
+                PrintString(event->GetNotification(0));
                 should_remove = true;
                 break;
             }
@@ -181,15 +184,14 @@ class Memo {
                 int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
                 
                 if (hour == notify_hour && hour < nbe->GetDeadline()) {
-                    std::cout << event->GetNotification(0) << "\n";
+                    PrintString(event->GetNotification(0));
                     move_to_time = nbe->GetDeadline();
                 } else if (hour == nbe->GetDeadline()) {
                     if (hour == notify_hour) {
-                        // Both pre-notify and deadline-notify at same time
-                        std::cout << event->GetNotification(0) << "\n";
-                        std::cout << event->GetNotification(1) << "\n";
+                        PrintString(event->GetNotification(0));
+                        PrintString(event->GetNotification(1));
                     } else {
-                        std::cout << event->GetNotification(1) << "\n";
+                        PrintString(event->GetNotification(1));
                     }
                     should_remove = true;
                 }
@@ -201,7 +203,7 @@ class Memo {
                 int freq = nle->GetFrequency();
                 int n = elapsed / freq;
                 
-                std::cout << event->GetNotification(n) << "\n";
+                PrintString(event->GetNotification(n));
                 move_to_time = hour + freq;
                 break;
             }
