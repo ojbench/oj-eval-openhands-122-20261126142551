@@ -15,9 +15,15 @@ enum EventType {
 // Node in the linked list representing a scheduled notification
 struct Node {
     const Event* event;
-    int next_time;
     EventType type;
     Node* next;
+};
+
+// Time slot: holds events due at a specific time
+struct TimeSlot {
+    int time;
+    Node* head;
+    TimeSlot* next;
 };
 
 inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
@@ -36,50 +42,98 @@ class Memo {
 
   // 构造函数，参数duration表示需要模拟第1~duration小时的备忘录
   Memo(int duration) : duration_(duration), current_hour_(0) {
-    head_ = nullptr;
+    slots_ = nullptr;
+    current_slot_ = nullptr;
   }
 
   // 析构函数，需保证没有内存泄漏
   ~Memo() {
-    Node* cur = head_;
-    while (cur != nullptr) {
-        Node* tmp = cur;
-        cur = cur->next;
+    TimeSlot* ts = slots_;
+    while (ts != nullptr) {
+        Node* n = ts->head;
+        while (n != nullptr) {
+            Node* tmp = n;
+            n = n->next;
+            delete tmp;
+        }
+        TimeSlot* tmp = ts;
+        ts = ts->next;
         delete tmp;
     }
-    head_ = nullptr;
+    slots_ = nullptr;
+    current_slot_ = nullptr;
   }
 
-  // Helper: remove a specific node from the list
-  void RemoveNode(Node* target) {
-    Node* p = head_;
-    Node* pp = nullptr;
-    while (p != nullptr && p != target) {
-        pp = p;
-        p = p->next;
+  // Helper: find or create a time slot for the given time
+  TimeSlot* GetOrCreateSlot(int time) {
+    TimeSlot* prev = nullptr;
+    TimeSlot* cur = slots_;
+    while (cur != nullptr && cur->time < time) {
+        prev = cur;
+        cur = cur->next;
     }
-    if (p == target) {
-        if (pp == nullptr) {
-            head_ = target->next;
+    
+    if (cur == nullptr || cur->time > time) {
+        // Create new slot
+        TimeSlot* newSlot = new TimeSlot;
+        newSlot->time = time;
+        newSlot->head = nullptr;
+        newSlot->next = cur;
+        if (prev == nullptr) {
+            slots_ = newSlot;
         } else {
-            pp->next = target->next;
+            prev->next = newSlot;
         }
+        cur = newSlot;
+    }
+    return cur;
+  }
+
+  // Helper: remove a node from its time slot's list
+  void RemoveNodeFromSlot(Node* target) {
+    // Find which slot this node belongs to
+    TimeSlot* ts = slots_;
+    while (ts != nullptr) {
+        Node* prev = nullptr;
+        Node* cur = ts->head;
+        while (cur != nullptr && cur != target) {
+            prev = cur;
+            cur = cur->next;
+        }
+        if (cur == target) {
+            if (prev == nullptr) {
+                ts->head = target->next;
+            } else {
+                prev->next = target->next;
+            }
+            return;
+        }
+        ts = ts->next;
     }
   }
 
-  // Helper: insert a node into sorted position by next_time
-  void InsertNode(Node* node) {
-    if (head_ == nullptr || head_->next_time >= node->next_time) {
-        node->next = head_;
-        head_ = node;
+  // Helper: add a node to a specific time slot's list (at tail)
+  void AddNodeToSlot(TimeSlot* slot, Node* node) {
+    node->next = nullptr;
+    if (slot->head == nullptr) {
+        slot->head = node;
     } else {
-        Node* ip = head_;
-        while (ip->next != nullptr && ip->next->next_time < node->next_time) {
-            ip = ip->next;
+        Node* cur = slot->head;
+        while (cur->next != nullptr) {
+            cur = cur->next;
         }
-        node->next = ip->next;
-        ip->next = node;
+        cur->next = node;
     }
+  }
+
+  // Helper: print string using printf for speed
+  void PrintString(const std::string& s) {
+    const char* cstr = s.c_str();
+    while (*cstr) {
+        fputc(*cstr, stdout);
+        cstr++;
+    }
+    fputc('\n', stdout);
   }
 
   // 向备忘录中加入一项事件。传入一个Event指针，需根据实际派生类类型进行具体操作
@@ -103,20 +157,10 @@ class Memo {
     
     Node* newNode = new Node;
     newNode->event = event;
-    newNode->next_time = add_time;
     newNode->type = etype;
-    newNode->next = nullptr;
-    InsertNode(newNode);
-  }
-
-  // Helper: print string using printf for speed
-  void PrintString(const std::string& s) {
-    const char* cstr = s.c_str();
-    while (*cstr) {
-        fputc(*cstr, stdout);
-        cstr++;
-    }
-    fputc('\n', stdout);
+    
+    TimeSlot* slot = GetOrCreateSlot(add_time);
+    AddNodeToSlot(slot, newNode);
   }
 
   // 模拟时间流逝，进行下一个小时的事件提醒
@@ -126,48 +170,25 @@ class Memo {
     
     int hour = current_hour_;
     
-    // Pass 1: count nodes at current hour and remove outdated nodes
-    int count_at_hour = 0;
-    Node* prev = nullptr;
-    Node* cur = head_;
-    while (cur != nullptr) {
-        if (cur->next_time < hour) {
-            Node* tmp = cur;
-            if (prev == nullptr) {
-                head_ = cur->next;
-            } else {
-                prev->next = cur->next;
-            }
-            cur = cur->next;
-            delete tmp;
-            continue;
-        }
-        
-        if (cur->next_time > hour) {
-            break;
-        }
-        
-        count_at_hour++;
-        prev = cur;
-        cur = cur->next;
+    // Advance current_slot_ to the right time slot
+    if (current_slot_ == nullptr || current_slot_->time < hour) {
+        current_slot_ = GetOrCreateSlot(hour);
+    } else if (current_slot_->time > hour) {
+        // Should not happen if called sequentially
+        current_slot_ = GetOrCreateSlot(hour);
     }
     
-    // Pass 2: process each node at the current hour
-    for (int i = 0; i < count_at_hour; i++) {
-        Node* node = nullptr;
-        Node* p = head_;
-        while (p != nullptr && p->next_time != hour) {
-            p = p->next;
-        }
-        if (p == nullptr) break;
-        node = p;
-        
+    // Process all nodes in the current time slot
+    Node* node = current_slot_->head;
+    current_slot_->head = nullptr;
+    
+    while (node != nullptr) {
+        Node* next_node = node->next;
         const Event* event = node->event;
         
         if (event->IsComplete()) {
-            RemoveNode(node);
             delete node;
-            i--;
+            node = next_node;
             continue;
         }
         
@@ -211,21 +232,19 @@ class Memo {
         }
         
         if (should_remove) {
-            RemoveNode(node);
             delete node;
-            i--;
         } else if (move_to_time > 0) {
-            RemoveNode(node);
-            node->next_time = move_to_time;
-            node->next = nullptr;
-            InsertNode(node);
-            i--;
+            TimeSlot* newSlot = GetOrCreateSlot(move_to_time);
+            AddNodeToSlot(newSlot, node);
         }
+        
+        node = next_node;
     }
   }
 
  private:
-    Node* head_;
+    TimeSlot* slots_;
+    TimeSlot* current_slot_;
     int duration_;
     int current_hour_;
 };
