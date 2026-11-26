@@ -172,7 +172,7 @@ class Memo {
         
         switch (node->type) {
             case TYPE_NORMAL: {
-                std::cout << event->GetNotification(0) << std::endl;
+                std::cout << event->GetNotification(0) << "\n";
                 should_remove = true;
                 break;
             }
@@ -181,15 +181,15 @@ class Memo {
                 int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
                 
                 if (hour == notify_hour && hour < nbe->GetDeadline()) {
-                    std::cout << event->GetNotification(0) << std::endl;
+                    std::cout << event->GetNotification(0) << "\n";
                     move_to_time = nbe->GetDeadline();
                 } else if (hour == nbe->GetDeadline()) {
                     if (hour == notify_hour) {
                         // Both pre-notify and deadline-notify at same time
-                        std::cout << event->GetNotification(0) << std::endl;
-                        std::cout << event->GetNotification(1) << std::endl;
+                        std::cout << event->GetNotification(0) << "\n";
+                        std::cout << event->GetNotification(1) << "\n";
                     } else {
-                        std::cout << event->GetNotification(1) << std::endl;
+                        std::cout << event->GetNotification(1) << "\n";
                     }
                     should_remove = true;
                 }
@@ -201,7 +201,7 @@ class Memo {
                 int freq = nle->GetFrequency();
                 int n = elapsed / freq;
                 
-                std::cout << event->GetNotification(n) << std::endl;
+                std::cout << event->GetNotification(n) << "\n";
                 move_to_time = hour + freq;
                 break;
             }
