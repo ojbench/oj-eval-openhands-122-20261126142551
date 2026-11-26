@@ -2,6 +2,7 @@
 #define MEMO_HPP
 
 #include "event.h"
+#include <iostream>
 #include <cstdio>
 
 // Event type enum for fast dispatch
