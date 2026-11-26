@@ -2,10 +2,14 @@
 #define MEMO_HPP
 
 #include "event.h"
-#include <vector>
-#include <memory>
 #include <iostream>
-#include <functional>
+
+// Node in the linked list representing a scheduled notification
+struct Node {
+    const Event* event;
+    int next_time;  // when this event should be notified again (-1 if no more notifications)
+    Node* next;
+};
 
 inline std::string CustomNotifyLateEvent::GetNotification(int n) const {
     // Step 1: Call base class GetNotification(n)
@@ -23,36 +27,76 @@ class Memo {
 
   // 构造函数，参数duration表示需要模拟第1~duration小时的备忘录
   Memo(int duration) : duration_(duration), current_hour_(0) {
-    // Allocate event storage
-    events_.reserve(1024);
+    head_ = nullptr;
   }
 
   // 析构函数，需保证没有内存泄漏
   ~Memo() {
-    // Events are externally owned, do not delete them
-    events_.clear();
+    Node* cur = head_;
+    while (cur != nullptr) {
+        Node* tmp = cur;
+        cur = cur->next;
+        delete tmp;
+    }
+    head_ = nullptr;
+  }
+
+  // Helper: remove a specific node from the list
+  void RemoveNode(Node* target) {
+    Node* p = head_;
+    Node* pp = nullptr;
+    while (p != nullptr && p != target) {
+        pp = p;
+        p = p->next;
+    }
+    if (p == target) {
+        if (pp == nullptr) {
+            head_ = target->next;
+        } else {
+            pp->next = target->next;
+        }
+    }
+  }
+
+  // Helper: insert a node into sorted position by next_time
+  void InsertNode(Node* node) {
+    if (head_ == nullptr || head_->next_time >= node->next_time) {
+        node->next = head_;
+        head_ = node;
+    } else {
+        Node* ip = head_;
+        while (ip->next != nullptr && ip->next->next_time < node->next_time) {
+            ip = ip->next;
+        }
+        node->next = ip->next;
+        ip->next = node;
+    }
   }
 
   // 向备忘录中加入一项事件。传入一个Event指针，需根据实际派生类类型进行具体操作
   void AddEvent(const Event *event) {
     if (event == nullptr) return;
     
-    EventEntry entry;
-    entry.event = event;
-    entry.notify_count_ = 0;
+    int add_time = 0;
     
-    // Determine max notification count based on event type
     if (dynamic_cast<const NormalEvent*>(event) != nullptr) {
-      entry.max_notify = 1; // Only n=0
+        // NormalEvent: add to deadline list
+        add_time = event->GetDeadline();
     } else if (dynamic_cast<const NotifyBeforeEvent*>(event) != nullptr) {
-      entry.max_notify = 2; // n=0 and n=1
+        // NotifyBeforeEvent: add to notify_time list
+        const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
+        add_time = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
     } else if (dynamic_cast<const NotifyLateEvent*>(event) != nullptr) {
-      entry.max_notify = -1; // Unlimited (negative means unlimited)
-    } else {
-      entry.max_notify = 1;
+        // NotifyLateEvent: add to deadline list
+        add_time = event->GetDeadline();
     }
     
-    events_.push_back(entry);
+    // Create new node and insert into sorted linked list by time
+    Node* newNode = new Node;
+    newNode->event = event;
+    newNode->next_time = add_time;
+    newNode->next = nullptr;
+    InsertNode(newNode);
   }
 
   // 模拟时间流逝，进行下一个小时的事件提醒
@@ -62,67 +106,105 @@ class Memo {
     
     int hour = current_hour_;
     
-    for (auto& entry : events_) {
-      const Event* event = entry.event;
-      
-      // Skip completed events
-      if (event->IsComplete()) continue;
-      
-      // Try to notify based on event type
-      bool notified = false;
-      
-      if (const auto* ne = dynamic_cast<const NormalEvent*>(event)) {
-        // NormalEvent: notify at deadline with n=0
-        if (hour == ne->GetDeadline() && entry.notify_count_ < 1) {
-          std::cout << ne->GetNotification(0) << std::endl;
-          entry.notify_count_++;
-          notified = true;
-        }
-      } else if (const auto* nbe = dynamic_cast<const NotifyBeforeEvent*>(event)) {
-        // NotifyBeforeEvent: n=0 at deadline-notify_time+1, n=1 at deadline
-        int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
-        
-        if (hour == notify_hour && entry.notify_count_ < 1) {
-          std::cout << nbe->GetNotification(0) << std::endl;
-          entry.notify_count_++;
-          notified = true;
-        }
-        if (hour == nbe->GetDeadline() && entry.notify_count_ < 2) {
-          std::cout << nbe->GetNotification(1) << std::endl;
-          entry.notify_count_++;
-          notified = true;
-        }
-      } else if (const auto* nle = dynamic_cast<const NotifyLateEvent*>(event)) {
-        // NotifyLateEvent: n=0 at deadline, n=k at deadline+k*frequency
-        if (hour >= nle->GetDeadline()) {
-          int elapsed = hour - nle->GetDeadline();
-          int freq = nle->GetFrequency();
-          
-          if (freq > 0 && elapsed % freq == 0) {
-            int n = elapsed / freq;
-            if (n >= entry.notify_count_) {
-              std::cout << nle->GetNotification(n) << std::endl;
-              entry.notify_count_ = n + 1;
-              notified = true;
+    // Pass 1: count nodes at current hour and remove outdated nodes
+    int count_at_hour = 0;
+    Node* prev = nullptr;
+    Node* cur = head_;
+    while (cur != nullptr) {
+        if (cur->next_time < hour) {
+            // Outdated node, remove
+            Node* tmp = cur;
+            if (prev == nullptr) {
+                head_ = cur->next;
+            } else {
+                prev->next = cur->next;
             }
-          }
+            cur = cur->next;
+            delete tmp;
+            continue;
         }
-      }
-      
-      (void)notified; // suppress unused warning
+        
+        if (cur->next_time > hour) {
+            break;
+        }
+        
+        count_at_hour++;
+        prev = cur;
+        cur = cur->next;
+    }
+    
+    // Pass 2: process each node at the current hour
+    for (int i = 0; i < count_at_hour; i++) {
+        // Find the first node at current hour
+        Node* node = nullptr;
+        Node* p = head_;
+        while (p != nullptr && p->next_time != hour) {
+            p = p->next;
+        }
+        if (p == nullptr) break;
+        node = p;
+        
+        const Event* event = node->event;
+        
+        if (event->IsComplete()) {
+            // Completed, remove node
+            RemoveNode(node);
+            delete node;
+            i--;
+            continue;
+        }
+        
+        bool should_remove = false;
+        int move_to_time = -1;
+        
+        if (dynamic_cast<const NormalEvent*>(event) != nullptr) {
+            std::cout << event->GetNotification(0) << std::endl;
+            should_remove = true;
+        } else if (dynamic_cast<const NotifyBeforeEvent*>(event) != nullptr) {
+            const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
+            int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
+            
+            if (hour == notify_hour && hour < nbe->GetDeadline()) {
+                std::cout << event->GetNotification(0) << std::endl;
+                move_to_time = nbe->GetDeadline();
+            } else if (hour == nbe->GetDeadline()) {
+                if (hour == notify_hour) {
+                    // Both pre-notify and deadline-notify at same time
+                    std::cout << event->GetNotification(0) << std::endl;
+                    std::cout << event->GetNotification(1) << std::endl;
+                } else {
+                    std::cout << event->GetNotification(1) << std::endl;
+                }
+                should_remove = true;
+            }
+        } else if (dynamic_cast<const NotifyLateEvent*>(event) != nullptr) {
+            const NotifyLateEvent* nle = static_cast<const NotifyLateEvent*>(event);
+            int elapsed = hour - nle->GetDeadline();
+            int freq = nle->GetFrequency();
+            int n = elapsed / freq;
+            
+            std::cout << event->GetNotification(n) << std::endl;
+            move_to_time = hour + freq;
+        }
+        
+        if (should_remove) {
+            RemoveNode(node);
+            delete node;
+            i--;
+        } else if (move_to_time > 0) {
+            RemoveNode(node);
+            node->next_time = move_to_time;
+            node->next = nullptr;
+            InsertNode(node);
+            i--;
+        }
     }
   }
 
  private:
-  struct EventEntry {
-    const Event* event = nullptr;
-    int notify_count_ = 0;
-    int max_notify = -1; // -1 means unlimited
-  };
-  
-  std::vector<EventEntry> events_;
-  int duration_;
-  int current_hour_;
+    Node* head_;
+    int duration_;
+    int current_hour_;
 };
 
 #endif
