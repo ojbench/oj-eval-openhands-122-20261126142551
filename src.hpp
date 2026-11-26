@@ -5,6 +5,15 @@
 #include <iostream>
 #include <cstdio>
 
+// Buffer stdout for faster output
+static int memo_buf_size = 0;
+static char memo_stdout_buf[1 << 20];
+struct MemoIOInit {
+    MemoIOInit() {
+        setvbuf(stdout, memo_stdout_buf, _IOFBF, sizeof(memo_stdout_buf));
+    }
+} memo_io_init;
+
 // Event type enum for fast dispatch
 enum EventType {
     TYPE_NORMAL,
