@@ -4,10 +4,18 @@
 #include "event.h"
 #include <iostream>
 
+// Event type enum for fast dispatch
+enum EventType {
+    TYPE_NORMAL,
+    TYPE_NOTIFY_BEFORE,
+    TYPE_NOTIFY_LATE
+};
+
 // Node in the linked list representing a scheduled notification
 struct Node {
     const Event* event;
     int next_time;  // when this event should be notified again (-1 if no more notifications)
+    EventType type;
     Node* next;
 };
 
@@ -78,23 +86,28 @@ class Memo {
     if (event == nullptr) return;
     
     int add_time = 0;
+    EventType etype = TYPE_NORMAL;
     
     if (dynamic_cast<const NormalEvent*>(event) != nullptr) {
         // NormalEvent: add to deadline list
         add_time = event->GetDeadline();
+        etype = TYPE_NORMAL;
     } else if (dynamic_cast<const NotifyBeforeEvent*>(event) != nullptr) {
         // NotifyBeforeEvent: add to notify_time list
         const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
         add_time = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
+        etype = TYPE_NOTIFY_BEFORE;
     } else if (dynamic_cast<const NotifyLateEvent*>(event) != nullptr) {
         // NotifyLateEvent: add to deadline list
         add_time = event->GetDeadline();
+        etype = TYPE_NOTIFY_LATE;
     }
     
     // Create new node and insert into sorted linked list by time
     Node* newNode = new Node;
     newNode->event = event;
     newNode->next_time = add_time;
+    newNode->type = etype;
     newNode->next = nullptr;
     InsertNode(newNode);
   }
@@ -157,34 +170,41 @@ class Memo {
         bool should_remove = false;
         int move_to_time = -1;
         
-        if (dynamic_cast<const NormalEvent*>(event) != nullptr) {
-            std::cout << event->GetNotification(0) << std::endl;
-            should_remove = true;
-        } else if (dynamic_cast<const NotifyBeforeEvent*>(event) != nullptr) {
-            const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
-            int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
-            
-            if (hour == notify_hour && hour < nbe->GetDeadline()) {
+        switch (node->type) {
+            case TYPE_NORMAL: {
                 std::cout << event->GetNotification(0) << std::endl;
-                move_to_time = nbe->GetDeadline();
-            } else if (hour == nbe->GetDeadline()) {
-                if (hour == notify_hour) {
-                    // Both pre-notify and deadline-notify at same time
-                    std::cout << event->GetNotification(0) << std::endl;
-                    std::cout << event->GetNotification(1) << std::endl;
-                } else {
-                    std::cout << event->GetNotification(1) << std::endl;
-                }
                 should_remove = true;
+                break;
             }
-        } else if (dynamic_cast<const NotifyLateEvent*>(event) != nullptr) {
-            const NotifyLateEvent* nle = static_cast<const NotifyLateEvent*>(event);
-            int elapsed = hour - nle->GetDeadline();
-            int freq = nle->GetFrequency();
-            int n = elapsed / freq;
-            
-            std::cout << event->GetNotification(n) << std::endl;
-            move_to_time = hour + freq;
+            case TYPE_NOTIFY_BEFORE: {
+                const NotifyBeforeEvent* nbe = static_cast<const NotifyBeforeEvent*>(event);
+                int notify_hour = nbe->GetDeadline() - nbe->GetNotifyTime() + 1;
+                
+                if (hour == notify_hour && hour < nbe->GetDeadline()) {
+                    std::cout << event->GetNotification(0) << std::endl;
+                    move_to_time = nbe->GetDeadline();
+                } else if (hour == nbe->GetDeadline()) {
+                    if (hour == notify_hour) {
+                        // Both pre-notify and deadline-notify at same time
+                        std::cout << event->GetNotification(0) << std::endl;
+                        std::cout << event->GetNotification(1) << std::endl;
+                    } else {
+                        std::cout << event->GetNotification(1) << std::endl;
+                    }
+                    should_remove = true;
+                }
+                break;
+            }
+            case TYPE_NOTIFY_LATE: {
+                const NotifyLateEvent* nle = static_cast<const NotifyLateEvent*>(event);
+                int elapsed = hour - nle->GetDeadline();
+                int freq = nle->GetFrequency();
+                int n = elapsed / freq;
+                
+                std::cout << event->GetNotification(n) << std::endl;
+                move_to_time = hour + freq;
+                break;
+            }
         }
         
         if (should_remove) {
